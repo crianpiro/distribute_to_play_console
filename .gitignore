@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+
+# Build artifacts
+*.apk
+*.aab
+artifacts/
+
+# Credentials (never commit service account keys)
+*credentials*.json
+*service-account*.json

@@ -1,0 +1,77 @@
+name: Integration test - Google Play Console
+
+# Manually triggered integration test against the real Play Developer API. It
+# needs:
+#   - secret PLAY_SERVICE_ACCOUNT: the JSON key of a service account invited
+#     to the test app in the Play Console.
+#   - a real, signed .aab or .apk of that app, with a version code Play has not
+#     seen yet, fetched at runtime from a URL (the repository ships none).
+#
+# Provide the artifact URL by passing `artifact_url` when dispatching, or set a
+# TEST_ARTIFACT_URL repository variable. For a private source, set a
+# TEST_ARTIFACT_TOKEN secret and it is sent as a Bearer token.
+#
+# Defaults to the internal track as a draft, so a test run never reaches users.
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_url:
+        description: URL of the .aab or .apk to upload. Defaults to the TEST_ARTIFACT_URL repo variable.
+        required: false
+        default: ""
+      track:
+        description: Track to upload to.
+        required: false
+        default: internal
+      status:
+        description: Release status (draft, completed, inProgress, halted).
+        required: false
+        default: draft
+
+permissions:
+  contents: read
+
+jobs:
+  test_action:
+    runs-on: ubuntu-latest
+    env:
+      ARTIFACT_URL: ${{ inputs.artifact_url || vars.TEST_ARTIFACT_URL }}
+      ARTIFACT_TOKEN: ${{ secrets.TEST_ARTIFACT_TOKEN }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download test artifact
+        id: download
+        run: |
+          set -euo pipefail
+          if [ -z "$ARTIFACT_URL" ]; then
+            echo "::error::No artifact URL. Pass 'artifact_url' when dispatching, or set the TEST_ARTIFACT_URL repository variable." >&2
+            exit 1
+          fi
+          case "${ARTIFACT_URL%%\?*}" in
+            *.apk) name=app.apk ;;
+            *) name=app.aab ;;
+          esac
+          auth=()
+          [ -n "$ARTIFACT_TOKEN" ] && auth=(-H "Authorization: Bearer $ARTIFACT_TOKEN")
+          curl -fSL "${auth[@]}" -H "Accept: application/octet-stream" "$ARTIFACT_URL" -o "$name"
+          ls -lh "$name"
+          echo "path=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Distribute to Google Play Console
+        id: distribute
+        uses: ./
+        with:
+          artifact: ${{ steps.download.outputs.path }}
+          credentials: ${{ secrets.PLAY_SERVICE_ACCOUNT }}
+          track: ${{ inputs.track }}
+          status: ${{ inputs.status }}
+          release-notes: "Integration test from ${{ github.sha }}"
+
+      - name: Print the result
+        env:
+          PACKAGE: ${{ steps.distribute.outputs.package-name }}
+          VERSION_CODE: ${{ steps.distribute.outputs.version-code }}
+          TRACK: ${{ steps.distribute.outputs.track }}
+        run: echo "Published $PACKAGE version code $VERSION_CODE to $TRACK"

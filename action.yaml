@@ -1,0 +1,141 @@
+name: Distribute to Google Play Console
+description: Upload an Android App Bundle (.aab) or APK to a Google Play Console track, with release notes, staged rollout and mapping files.
+author: Cristian Andres Picon Rodriguez
+
+branding:
+  color: green
+  icon: play
+
+inputs:
+  artifact:
+    description: Path to the .aab (or, for apps that still ship APKs, the .apk) to upload.
+    required: true
+  credentials:
+    description: >-
+      Contents of the Google service account JSON key that has release access
+      to the app in the Play Console. Provide this OR `credentials-file`.
+      Pass it through a secret.
+    required: false
+  credentials-file:
+    description: Path to the Google service account JSON key file. Provide this OR `credentials`.
+    required: false
+  package-name:
+    description: >-
+      The app's package name (applicationId). Read from the artifact when
+      empty. When set, it must match the artifact, so a flavored build can
+      never land on another flavor's listing.
+    required: false
+    default: ""
+  track:
+    description: >-
+      The track to release on: internal, alpha (closed testing), beta (open
+      testing), production, or the name of a custom closed testing track.
+    required: false
+    default: internal
+  status:
+    description: >-
+      Release status: completed (full rollout), inProgress (staged rollout,
+      needs user-fraction), draft, or halted. An app that has never been
+      published accepts only draft.
+    required: false
+    default: completed
+  user-fraction:
+    description: Share of users a staged rollout reaches, greater than 0 and less than 1 (0.1 is 10%). Only with status inProgress or halted.
+    required: false
+    default: ""
+  release-name:
+    description: The release's name in the Play Console. Play uses the version name when empty.
+    required: false
+    default: ""
+  release-notes:
+    description: >-
+      "What's new in this version" text. Play accepts 500 characters per
+      language; longer notes are shortened with a warning rather than failing
+      the release.
+    required: false
+    default: ""
+  release-notes-file:
+    description: Path to a file holding the release notes. Use this or release-notes, not both.
+    required: false
+    default: ""
+  release-notes-language:
+    description: BCP-47 language tag of the release notes, as Play lists it for the app.
+    required: false
+    default: en-US
+  in-app-update-priority:
+    description: In-app update priority, 0 to 5. Empty leaves Play's default (0).
+    required: false
+    default: ""
+  mapping-file:
+    description: Path to the R8/ProGuard mapping.txt, for deobfuscated crash reports. Empty for none.
+    required: false
+    default: ""
+  native-debug-symbols:
+    description: Path to a zip of native debug symbols, for symbolicated native crashes. Empty for none.
+    required: false
+    default: ""
+  changes-not-sent-for-review:
+    description: >-
+      Commit without sending the changes for review. Needed when Play answers
+      "Changes cannot be sent for review automatically"; someone then sends
+      them for review from the Play Console.
+    required: false
+    default: "false"
+
+outputs:
+  package-name:
+    description: The package the artifact was published to.
+    value: ${{ steps.publish.outputs.package-name }}
+  version-code:
+    description: The version code Play assigned to the uploaded artifact.
+    value: ${{ steps.publish.outputs.version-code }}
+  track:
+    description: The track the release was published on.
+    value: ${{ steps.publish.outputs.track }}
+  status:
+    description: The status the release was published with.
+    value: ${{ steps.publish.outputs.status }}
+
+runs:
+  using: composite
+  steps:
+    # Every input goes through a PLAY_-prefixed environment variable rather
+    # than being pasted into the script: release notes are a pull request
+    # description, written by whoever opens one, and anything interpolated
+    # into a shell line would run as a command wherever it held backticks or
+    # $( ). The prefix also keeps clear of variables bash or the runner
+    # already gives a meaning to.
+    #
+    # The script needs only python3 and openssl -- no pip install -- so it
+    # runs on a bare self-hosted runner as well as on the hosted images.
+    - name: Distribute to Google Play Console
+      id: publish
+      shell: bash
+      env:
+        PLAY_ARTIFACT: ${{ inputs.artifact }}
+        PLAY_CREDENTIALS: ${{ inputs.credentials }}
+        PLAY_CREDENTIALS_FILE: ${{ inputs.credentials-file }}
+        PLAY_PACKAGE_NAME: ${{ inputs.package-name }}
+        PLAY_TRACK: ${{ inputs.track }}
+        PLAY_STATUS: ${{ inputs.status }}
+        PLAY_USER_FRACTION: ${{ inputs.user-fraction }}
+        PLAY_RELEASE_NAME: ${{ inputs.release-name }}
+        PLAY_RELEASE_NOTES: ${{ inputs.release-notes }}
+        PLAY_RELEASE_NOTES_FILE: ${{ inputs.release-notes-file }}
+        PLAY_RELEASE_NOTES_LANGUAGE: ${{ inputs.release-notes-language }}
+        PLAY_IN_APP_UPDATE_PRIORITY: ${{ inputs.in-app-update-priority }}
+        PLAY_MAPPING_FILE: ${{ inputs.mapping-file }}
+        PLAY_NATIVE_DEBUG_SYMBOLS: ${{ inputs.native-debug-symbols }}
+        PLAY_CHANGES_NOT_SENT_FOR_REVIEW: ${{ inputs.changes-not-sent-for-review }}
+      run: |
+        set -euo pipefail
+        # Windows images name it python, and some Linux images only python3.
+        if command -v python3 >/dev/null 2>&1 && python3 -c 'import sys' >/dev/null 2>&1; then
+          py=python3
+        elif command -v python >/dev/null 2>&1; then
+          py=python
+        else
+          echo "::error::python3 is required but was not found on this runner."
+          exit 1
+        fi
+        "$py" "$GITHUB_ACTION_PATH/scripts/play_publish.py"

@@ -1,0 +1,47 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # The action runs on whatever runner the caller's job uses; the
+        # pipeline puts it on the Linux runner, but macOS ships LibreSSL as
+        # openssl, which signs differently enough to be worth covering.
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the tests
+        run: python3 -m unittest discover -s tests -v
+
+  validate:
+    name: Validate action.yaml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Every input must reach the script, and only through the environment:
+      # an input pasted into the run script would be shell-injectable.
+      - name: Check every input is passed through the environment
+        run: |
+          python3 - <<'EOF'
+          import re, sys, yaml
+          action = yaml.safe_load(open("action.yaml"))
+          step = action["runs"]["steps"][0]
+          passed = {re.search(r"inputs\.([\w-]+)", v).group(1) for v in step["env"].values()}
+          missing = set(action["inputs"]) - passed
+          if missing:
+              sys.exit(f"inputs not passed to the script: {sorted(missing)}")
+          if "inputs." in step["run"]:
+              sys.exit("an input is interpolated into the run script")
+          print("ok")
+          EOF
